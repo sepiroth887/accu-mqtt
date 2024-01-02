@@ -7,8 +7,19 @@ Due to API rate limits (25/day) it will poll the API only once every hour and us
 It is currently only allowing for a single location query (using lat/long values provided on startup) and a future version will likely have a local saved cast file to avoid query on restart... tbd
 
 # Usage
-Build via docker coming soon(tm)... for now: 
 
+## Docker (recommended)
+* Pull this repo (or download zip) onto the target platform (raspberry pi4 / amd64 tested)
+* Run `docker build -t accu-mqtt ./` from inside the repo root
+* Run the image `docker run -it -e ACCU_MQTT_BROKER=mqtt://your-broker-url:port -e ACCU_MQTT_TEST_DATA=true accu-mqtt`
+* You should see it sending dummy data
+* Setup the API tokens and lat long values using: 
+    * ACCU_MQTT_API_TOKEN
+    * ACCU_MQTT_LATITUDE
+    * ACCU_MQTT_LONGITUDE
+* profit
+
+## Golang build env (I assume you know what you are doing)
 ensure golang is installed and build it using `go build .` and use the resulting `accu-mqtt` binary (`accu-mqtt --help`)
 
 provide the required inputs (mqtt broker, api token (make sure to select minute cast api in your AccuWeather App) as well as lat/long (x/y flags).
