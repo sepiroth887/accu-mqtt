@@ -11,7 +11,7 @@ type MinuteCast struct {
 	Summaries  []Summary `json:"Summaries"`
 	Link       string    `json:"Link"`
 	MobileLink string    `json:"MobileLink"`
-	UpdateTime time.Time
+	UpdateTime time.Time `json:"updateTime,omitempty"`
 }
 
 type Summary struct {

@@ -34,7 +34,7 @@ type Start struct {
 	AccuAPIToken string  `help:"Accu Weather API app token" short:"t" env:"ACCU_MQTT_API_TOKEN"`
 	Latitude     float32 `help:"Latitude of location with up to 3 digit precision, e.g. -120.223" short:"x" env:"ACCU_MQTT_LATITUDE"`
 	Longitude    float32 `help:"Longitude of location with up to 3 digit precision, e.g. -120.223" short:"y" env:"ACCU_MQTT_LONGITUDE"`
-	UseTestData  bool    `help:"Use sample ./response.json instead of real API (for testing)" short:"d" env:"ACCU_MQTT_TEST_DATA"`
+	UseTestData  bool    `help:"Use sample ./response.json instead of real API (for testing)" short:"d" env:"ACCU_MQTT_TEST_DATA" default:"false"`
 }
 
 var cli struct {
@@ -215,8 +215,13 @@ func registerSensors(debug bool) error {
 func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err error) {
 	hClient := http.Client{}
 	hClient.Timeout = time.Second * 15
-	cast = MinuteCast{
-		UpdateTime: time.Now(),
+
+	// try to load existing data and check if valid to avoid another query. (e.g. on restarts)
+	data, _ := os.ReadFile("./last_update.json")
+	err = json.Unmarshal(data, &cast)
+	if err == nil && time.Since(cast.UpdateTime) < 1*time.Hour {
+		fmt.Println("using existing cast data from file")
+		return cast, err
 	}
 
 	if !useTestData {
@@ -224,24 +229,37 @@ func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err
 		if err != nil {
 			return cast, err
 		}
+
+		if res.StatusCode < 199 || res.StatusCode > 299 {
+			data, _ := io.ReadAll(res.Body)
+			return cast, fmt.Errorf("failed to request cast from live api: status [%d]: %s", res.StatusCode, string(data))
+		}
+
 		defer res.Body.Close()
 		data, err := io.ReadAll(res.Body)
 		if err != nil {
 			return cast, err
 		}
+
 		err = json.Unmarshal(data, &cast)
 		if err != nil {
 			return cast, err
 		}
-
-		os.WriteFile("./last_update.json", data, 0777)
-	} else {
-		data, _ := os.ReadFile("./last_update.json")
-		err := json.Unmarshal(data, &cast)
-		if err != nil {
-			return cast, err
+		cast.UpdateTime = time.Now()
+		if cli.Debug {
+			fmt.Println("Received live cast: ", string(data))
 		}
+
+		data, _ = json.Marshal(&cast)
+		os.WriteFile("./last_update.json", data, 0777)
 	}
+
+	data, _ = os.ReadFile("./last_update.json")
+	err = json.Unmarshal(data, &cast)
+	if err != nil {
+		return cast, err
+	}
+
 	return
 }
 
@@ -266,7 +284,7 @@ func getStateFromCast(cast MinuteCast) State {
 					Message:   cast.Summary.Phrase,
 				}
 			}
-			if sum.Type != nil && rainStart == 0 {
+			if sum.Type != nil && rainStart == 0 && !time.Now().After(cast.UpdateTime.Add(time.Duration(sum.StartMinute)*time.Minute)) {
 				rainStart = sum.StartMinute
 				rainEnd = sum.EndMinute
 			}
