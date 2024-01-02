@@ -1,6 +1,4 @@
-ARG arch=
-
-FROM --platform=linux/$arch golang:1.21.5-alpine3.19
+FROM golang:1.21.5-alpine3.19
 
 COPY ./ /go/github.com/sepiroth887/accu-mqtt
 
@@ -8,7 +6,7 @@ WORKDIR /go/github.com/sepiroth887/accu-mqtt
 
 RUN go build -o /tmp/accu-mqtt .
 
-FROM --platform=linux/$arch scratch 
+FROM scratch 
 
 COPY --from=0 /tmp/accu-mqtt /usr/bin/accu-mqtt
 COPY ./last_update.json /last_update.json
