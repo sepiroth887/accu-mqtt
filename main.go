@@ -273,7 +273,7 @@ func getStateFromCast(cast MinuteCast) State {
 					Message:   cast.Summary.Phrase,
 				}
 			}
-			if sum.Type != nil && rainStart == 0 {
+			if sum.Type != nil && rainStart == 0 && time.Now().After(cast.UpdateTime.Add(time.Duration(sum.StartMinute)*time.Minute)) {
 				rainStart = sum.StartMinute
 				rainEnd = sum.EndMinute
 			}
