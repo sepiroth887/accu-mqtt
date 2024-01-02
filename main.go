@@ -216,6 +216,14 @@ func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err
 	hClient := http.Client{}
 	hClient.Timeout = time.Second * 15
 
+	// try to load existing data and check if valid to avoid another query. (e.g. on restarts)
+	data, _ := os.ReadFile("./last_update.json")
+	err = json.Unmarshal(data, &cast)
+	if err == nil && time.Since(cast.UpdateTime) < 1*time.Hour {
+		fmt.Println("using existing cast data from file")
+		return cast, err
+	}
+
 	if !useTestData {
 		res, err := hClient.Get(fmt.Sprintf("https://dataservice.accuweather.com/forecasts/v1/minute?q=%s&apikey=%s", loc, apiKey))
 		if err != nil {
@@ -232,6 +240,7 @@ func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err
 		if err != nil {
 			return cast, err
 		}
+
 		err = json.Unmarshal(data, &cast)
 		if err != nil {
 			return cast, err
@@ -240,10 +249,12 @@ func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err
 		if cli.Debug {
 			fmt.Println("Received live cast: ", string(data))
 		}
+
+		data, _ = json.Marshal(&cast)
 		os.WriteFile("./last_update.json", data, 0777)
 	}
 
-	data, _ := os.ReadFile("./last_update.json")
+	data, _ = os.ReadFile("./last_update.json")
 	err = json.Unmarshal(data, &cast)
 	if err != nil {
 		return cast, err
@@ -273,7 +284,7 @@ func getStateFromCast(cast MinuteCast) State {
 					Message:   cast.Summary.Phrase,
 				}
 			}
-			if sum.Type != nil && rainStart == 0 && time.Now().After(cast.UpdateTime.Add(time.Duration(sum.StartMinute)*time.Minute)) {
+			if sum.Type != nil && rainStart == 0 && !time.Now().After(cast.UpdateTime.Add(time.Duration(sum.StartMinute)*time.Minute)) {
 				rainStart = sum.StartMinute
 				rainEnd = sum.EndMinute
 			}
