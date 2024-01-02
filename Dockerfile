@@ -9,6 +9,7 @@ RUN go build -o /tmp/accu-mqtt .
 FROM scratch 
 
 COPY --from=0 /tmp/accu-mqtt /usr/bin/accu-mqtt
+COPY --from=0 /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY ./last_update.json /last_update.json
 
 ENV ACCU_MQTT_BROKER mqtt://127.0.0.1:1883
