@@ -48,5 +48,6 @@ type Device struct {
 type State struct {
 	Weather   string `json:"weather"`
 	RainStart int    `json:"rain_start"`
+	RainEnd   int    `json:"rain_end"`
 	Message   string `json:"message"`
 }

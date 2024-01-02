@@ -13,6 +13,22 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
+type CommandError struct {
+	error
+	exitCode int
+}
+
+func (c CommandError) GetExitCode() int {
+	return c.exitCode
+}
+
+func NewCommandError(err error, exitCode int) CommandError {
+	c := CommandError{}
+	c.error = err
+	c.exitCode = exitCode
+	return c
+}
+
 type Start struct {
 	BrokerURL    string  `help:"MQTT server url (mqtt://foo.bar:1883)" short:"b" env:"ACCU_MQTT_BROKER"`
 	AccuAPIToken string  `help:"Accu Weather API app token" short:"t" env:"ACCU_MQTT_API_TOKEN"`
@@ -28,62 +44,13 @@ var cli struct {
 
 var mqttClient mqtt.Client
 
-func registerSensors(debug bool) error {
-	registerRain := Registration{
-		Name:                "Rain Indicator",
-		UniqueID:            "a63ca366-9eda-4301-9428-93b173d15b9a_accu",
-		StateTopic:          "accu-mqtt/state",
-		Icon:                "mdi:information-outline",
-		Platform:            "mqtt",
-		AvailabilityTopic:   "accu-mqtt/available",
-		ValueTemplate:       "{{ value_json.weather }}",
-		JSONAttributesTopic: "accu-mqtt/state",
-		PayloadAvailable:    "online",
-		PayloadNotAvailable: "offline",
-		Device: Device{
-			Identifiers:  []string{"a63ca366-9eda-4301-9428-93b173d15b9a"},
-			Name:         "Accu Weather MinuteCast",
-			Manufacturer: "me",
-			Model:        "t2000",
-		},
-	}
-	data, _ := json.Marshal(&registerRain)
-	if debug {
-		fmt.Printf("Sending registration payload:\n%v\n", registerRain)
+func main() {
+	ctx := kong.Parse(&cli)
+	if err := ctx.Run(cli.Debug); err != nil {
+		fmt.Printf("failed to run command: %v\n", err)
+		os.Exit(err.(CommandError).GetExitCode())
 	}
 
-	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rain/config", 0, false, data); t.Wait() && t.Error() != nil {
-		return t.Error()
-	}
-
-	registerMinutesSensor := Registration{
-		Name:                "Rain Start",
-		UniqueID:            "a63ca366-9eda-4301-9428-93b173d15b9a_rain",
-		StateTopic:          "accu-mqtt/state",
-		Icon:                "mdi:information-outline",
-		Platform:            "mqtt",
-		AvailabilityTopic:   "accu-mqtt/available",
-		ValueTemplate:       "{{ value_json.rain_start }}",
-		JSONAttributesTopic: "accu-mqtt/state",
-		PayloadAvailable:    "online",
-		PayloadNotAvailable: "offline",
-		Device: Device{
-			Identifiers:  []string{"a63ca366-9eda-4301-9428-93b173d15b9a"},
-			Name:         "Accu Weather MinuteCast",
-			Manufacturer: "me",
-			Model:        "t2000",
-		},
-	}
-	data, _ = json.Marshal(&registerMinutesSensor)
-	if debug {
-		fmt.Printf("Sending registration payload:\n%v\n", registerMinutesSensor)
-	}
-
-	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rainstart/config", 0, false, data); t.Wait() && t.Error() != nil {
-		return t.Error()
-	}
-
-	return nil
 }
 
 func (s *Start) Run(debug bool) error {
@@ -96,13 +63,13 @@ func (s *Start) Run(debug bool) error {
 	mqttClient = mqtt.NewClient(opts)
 
 	if t := mqttClient.Connect(); t.Wait() && t.Error() != nil {
-		return t.Error()
+		return NewCommandError(t.Error(), 1)
 	}
 	defer mqttClient.Disconnect(100)
 
 	err := registerSensors(debug)
 	if err != nil {
-		return err
+		return NewCommandError(err, 2)
 	}
 
 	loc := fmt.Sprintf("%.3f,%.3f", s.Latitude, s.Longitude)
@@ -119,7 +86,7 @@ func (s *Start) Run(debug bool) error {
 		fmt.Println("Sending online status payload on accu-mqtt/available")
 	}
 	if t := mqttClient.Publish("accu-mqtt/available", 0, true, "online"); t.Wait() && t.Error() != nil {
-		return t.Error()
+		return NewCommandError(t.Error(), 3)
 	}
 
 	var data []byte
@@ -160,9 +127,89 @@ func (s *Start) Run(debug bool) error {
 	return nil
 }
 
-func main() {
-	ctx := kong.Parse(&cli)
-	ctx.Run(cli.Debug)
+func registerSensors(debug bool) error {
+	registerRain := Registration{
+		Name:                "Rain Indicator",
+		UniqueID:            "a63ca366-9eda-4301-9428-93b173d15b9a_accu",
+		StateTopic:          "accu-mqtt/state",
+		Icon:                "mdi:information-outline",
+		Platform:            "mqtt",
+		AvailabilityTopic:   "accu-mqtt/available",
+		ValueTemplate:       "{{ value_json.weather }}",
+		JSONAttributesTopic: "accu-mqtt/state",
+		PayloadAvailable:    "online",
+		PayloadNotAvailable: "offline",
+		Device: Device{
+			Identifiers:  []string{"a63ca366-9eda-4301-9428-93b173d15b9a"},
+			Name:         "Accu Weather MinuteCast",
+			Manufacturer: "me",
+			Model:        "t2000",
+		},
+	}
+	data, _ := json.Marshal(&registerRain)
+	if debug {
+		fmt.Printf("Sending registration payload:\n%v\n", registerRain)
+	}
+
+	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rain/config", 0, false, data); t.Wait() && t.Error() != nil {
+		return t.Error()
+	}
+
+	registerStartSensor := Registration{
+		Name:                "Rain Start",
+		UniqueID:            "a63ca366-9eda-4301-9428-93b173d15b9a_rainstart",
+		StateTopic:          "accu-mqtt/state",
+		Icon:                "mdi:information-outline",
+		Platform:            "mqtt",
+		AvailabilityTopic:   "accu-mqtt/available",
+		ValueTemplate:       "{{ value_json.rain_start }}",
+		JSONAttributesTopic: "accu-mqtt/state",
+		PayloadAvailable:    "online",
+		PayloadNotAvailable: "offline",
+		Device: Device{
+			Identifiers:  []string{"a63ca366-9eda-4301-9428-93b173d15b9a"},
+			Name:         "Accu Weather MinuteCast",
+			Manufacturer: "me",
+			Model:        "t2000",
+		},
+	}
+	data, _ = json.Marshal(&registerStartSensor)
+	if debug {
+		fmt.Printf("Sending registration payload:\n%v\n", registerStartSensor)
+	}
+
+	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rainstart/config", 0, false, data); t.Wait() && t.Error() != nil {
+		return t.Error()
+	}
+
+	registerEndSensor := Registration{
+		Name:                "Rain End",
+		UniqueID:            "a63ca366-9eda-4301-9428-93b173d15b9a_rainend",
+		StateTopic:          "accu-mqtt/state",
+		Icon:                "mdi:information-outline",
+		Platform:            "mqtt",
+		AvailabilityTopic:   "accu-mqtt/available",
+		ValueTemplate:       "{{ value_json.rain_end }}",
+		JSONAttributesTopic: "accu-mqtt/state",
+		PayloadAvailable:    "online",
+		PayloadNotAvailable: "offline",
+		Device: Device{
+			Identifiers:  []string{"a63ca366-9eda-4301-9428-93b173d15b9a"},
+			Name:         "Accu Weather MinuteCast",
+			Manufacturer: "me",
+			Model:        "t2000",
+		},
+	}
+	data, _ = json.Marshal(&registerEndSensor)
+	if debug {
+		fmt.Printf("Sending registration payload:\n%v\n", registerEndSensor)
+	}
+
+	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rainend/config", 0, false, data); t.Wait() && t.Error() != nil {
+		return t.Error()
+	}
+
+	return nil
 }
 
 func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err error) {
@@ -201,26 +248,40 @@ func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err
 func getStateFromCast(cast MinuteCast) State {
 	if cast.Summary.Type == nil {
 		return State{
-			Weather:   "CLEAR",
-			RainStart: 0,
-			Message:   cast.Summary.Phrase,
+			Weather: "CLEAR",
+			Message: cast.Summary.Phrase,
 		}
 	}
 
 	rainStart := 0
+	rainEnd := 0
 	switch *cast.Summary.Type {
 	case "RAIN":
 		for _, sum := range cast.Summaries {
 			if sum.Type != nil && isRainingNow(cast.UpdateTime, sum.StartMinute, sum.EndMinute) {
-				return State{Weather: "RAIN", RainStart: 0, Message: cast.Summary.Phrase}
+				return State{
+					Weather:   "RAIN",
+					RainStart: 0,
+					RainEnd:   sum.EndMinute - (int(time.Since(cast.UpdateTime).Minutes())),
+					Message:   cast.Summary.Phrase,
+				}
 			}
 			if sum.Type != nil && rainStart == 0 {
 				rainStart = sum.StartMinute
+				rainEnd = sum.EndMinute
 			}
 		}
-		return State{Weather: "SOON", RainStart: rainStart - (int(time.Since(cast.UpdateTime).Minutes())), Message: cast.Summary.Phrase}
+		return State{
+			Weather:   "SOON",
+			RainStart: rainStart - (int(time.Since(cast.UpdateTime).Minutes())),
+			RainEnd:   rainEnd - (int(time.Since(cast.UpdateTime).Minutes())),
+			Message:   cast.Summary.Phrase,
+		}
 	default:
-		return State{Weather: "No Data", RainStart: 0, Message: "unknown cast type: " + *cast.Summary.Type}
+		return State{
+			Weather: "No Data",
+			Message: "unknown cast type: " + *cast.Summary.Type,
+		}
 	}
 }
 

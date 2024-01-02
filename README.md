@@ -14,3 +14,8 @@ ensure golang is installed and build it using `go build .` and use the resulting
 provide the required inputs (mqtt broker, api token (make sure to select minute cast api in your AccuWeather App) as well as lat/long (x/y flags).
 
 enjoy.
+
+## Error Codes
+1 Failed to connect MQTT
+2 Failed to register sensors
+3 Failed to publish sensor status
