@@ -10,7 +10,7 @@ It is currently only allowing for a single location query (using lat/long values
 
 ## Docker (recommended)
 * `docker pull ghcr.io/sepiroth887/accu-mqtt:main`
-* Run the image `docker run -it -e ACCU_MQTT_BROKER=mqtt://your-broker-url:port -e ACCU_MQTT_TEST_DATA=true accu-mqtt`
+* Run the image `docker run -it -e ACCU_MQTT_BROKER=mqtt://your-broker-url:port -e ACCU_MQTT_TEST_DATA=true ghcr.io/sepiroth887/accu-mqtt:main`
 * You should see it sending dummy data
 * Setup the API tokens and lat long values using: 
     * ACCU_MQTT_API_TOKEN
