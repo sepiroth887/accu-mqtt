@@ -9,8 +9,7 @@ It is currently only allowing for a single location query (using lat/long values
 # Usage
 
 ## Docker (recommended)
-* Pull this repo (or download zip) onto the target platform (raspberry pi4 / amd64 tested)
-* Run `docker build -t accu-mqtt ./` from inside the repo root
+* `docker pull ghcr.io/sepiroth887/accu-mqtt:main`
 * Run the image `docker run -it -e ACCU_MQTT_BROKER=mqtt://your-broker-url:port -e ACCU_MQTT_TEST_DATA=true accu-mqtt`
 * You should see it sending dummy data
 * Setup the API tokens and lat long values using: 
