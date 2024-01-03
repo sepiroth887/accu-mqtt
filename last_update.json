@@ -1,1 +1,52 @@
-{"Summary":{"Phrase":"Rain starting in 15 min","Type":"RAIN","TypeId":1},"Summaries":[{"StartMinute":0,"EndMinute":14,"CountMinute":15,"MinuteText":"Rain starting in %minute_value min","Type":null,"TypeId":0},{"StartMinute":15,"EndMinute":49,"CountMinute":35,"MinuteText":"Rain ending in %minute_value min","Type":"RAIN","TypeId":1},{"StartMinute":50,"EndMinute":119,"CountMinute":70,"MinuteText":"No precipitation for at least %MINUTE_VALUE min","Type":null,"TypeId":0}],"Link":"","MobileLink":"","updateTime":"2024-01-02T14:10:32.229078972-08:00"}
+{
+    "Summary": {
+        "Phrase": "Rain starting in 10 min",
+        "Type": "RAIN",
+        "TypeId": 1
+    },
+    "Summaries": [
+        {
+            "StartMinute": 0,
+            "EndMinute": 9,
+            "CountMinute": 10,
+            "MinuteText": "Rain starting in %minute_value min",
+            "Type": null,
+            "TypeId": 0
+        },
+        {
+            "StartMinute": 10,
+            "EndMinute": 65,
+            "CountMinute": 56,
+            "MinuteText": "Rain will continue for %minute_value min",
+            "Type": "RAIN",
+            "TypeId": 1
+        },
+        {
+            "StartMinute": 66,
+            "EndMinute": 67,
+            "CountMinute": 2,
+            "MinuteText": "Rain will continue in %minute_value min",
+            "Type": null,
+            "TypeId": 0
+        },
+        {
+            "StartMinute": 68,
+            "EndMinute": 72,
+            "CountMinute": 5,
+            "MinuteText": "Rain will continue in %minute_value min",
+            "Type": "RAIN",
+            "TypeId": 1
+        },
+        {
+            "StartMinute": 73,
+            "EndMinute": 119,
+            "CountMinute": 47,
+            "MinuteText": "No precipitation for at least %MINUTE_VALUE min",
+            "Type": null,
+            "TypeId": 0
+        }
+    ],
+    "Link": "",
+    "MobileLink": "",
+    "updateTime": "2024-01-02T14:10:32.229078972-08:00"
+}

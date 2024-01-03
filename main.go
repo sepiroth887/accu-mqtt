@@ -271,6 +271,7 @@ func getStateFromCast(cast MinuteCast) State {
 		}
 	}
 
+	weather := "CLEAR"
 	rainStart := 0
 	rainEnd := 0
 	switch *cast.Summary.Type {
@@ -287,12 +288,13 @@ func getStateFromCast(cast MinuteCast) State {
 			if sum.Type != nil && rainStart == 0 && !time.Now().After(cast.UpdateTime.Add(time.Duration(sum.StartMinute)*time.Minute)) {
 				rainStart = sum.StartMinute
 				rainEnd = sum.EndMinute
+				weather = "SOON"
 			}
 		}
 		return State{
-			Weather:   "SOON",
-			RainStart: rainStart - (int(time.Since(cast.UpdateTime).Minutes())),
-			RainEnd:   rainEnd - (int(time.Since(cast.UpdateTime).Minutes())),
+			Weather:   weather,
+			RainStart: max(rainStart-(int(time.Since(cast.UpdateTime).Minutes())), 0),
+			RainEnd:   max(rainEnd-(int(time.Since(cast.UpdateTime).Minutes())), 0),
 			Message:   cast.Summary.Phrase,
 		}
 	default:
