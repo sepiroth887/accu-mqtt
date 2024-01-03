@@ -11,6 +11,8 @@ import (
 
 	"github.com/alecthomas/kong"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type CommandError struct {
@@ -37,52 +39,118 @@ type Start struct {
 	UseTestData  bool    `help:"Use sample ./response.json instead of real API (for testing)" short:"d" env:"ACCU_MQTT_TEST_DATA" default:"false"`
 }
 
-var cli struct {
-	Debug bool  `help:"enable debug" short:"v"`
-	Start Start `cmd:"" help:"start the provider"`
+type cli struct {
+	Debug      bool  `help:"enable debug" short:"v"`
+	Start      Start `cmd:"" help:"start the provider"`
+	mqttClient mqtt.Client
+	httpClient http.Client
+	cast       MinuteCast
 }
 
 var mqttClient mqtt.Client
 
 func main() {
-	ctx := kong.Parse(&cli)
-	if err := ctx.Run(cli.Debug); err != nil {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	c := cli{}
+	ctx := kong.Parse(&c)
+	if err := ctx.Run(c); err != nil {
 		fmt.Printf("failed to run command: %v\n", err)
 		os.Exit(err.(CommandError).GetExitCode())
 	}
-
 }
 
-func (s *Start) Run(debug bool) error {
+func (c *cli) RefreshCast(apiKey, loc string) {
+	if c.Start.UseTestData {
+		return
+	}
+	for range time.NewTicker(time.Minute * 80).C {
+		cast, err := queryAPI(c.httpClient, apiKey, loc)
+		if err != nil {
+			log.Warn().Err(err)
+		}
+		c.cast = cast
+	}
+}
+
+func queryAPI(httpClient http.Client, apiKey, loc string) (MinuteCast, error) {
+	res, err := httpClient.Get(fmt.Sprintf("https://dataservice.accuweather.com/forecasts/v1/minute?q=%s&apikey=%s", loc, apiKey))
+	if err != nil {
+		log.Warn().Err(err)
+		return MinuteCast{}, err
+	}
+
+	if res.StatusCode < 199 || res.StatusCode > 299 {
+		data, _ := io.ReadAll(res.Body)
+		return MinuteCast{}, fmt.Errorf("failed to request cast from live api: status [%d]: %s", res.StatusCode, string(data))
+	}
+
+	defer res.Body.Close()
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		return MinuteCast{}, err
+	}
+
+	var cast MinuteCast
+	err = json.Unmarshal(data, &cast)
+	if err != nil {
+		return MinuteCast{}, err
+	}
+	cast.UpdateTime = time.Now()
+	log.Debug().Msgf("Received live cast: %s", string(data))
+
+	data, _ = json.Marshal(&cast)
+	os.WriteFile("./last_update.json", data, 0777)
+
+	return cast, err
+}
+
+func (s *Start) Run(c cli) error {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(s.BrokerURL)
 	opts.SetClientID("accu-mqtt")
 	opts.SetCleanSession(true)
 	opts.SetStore(mqtt.NewMemoryStore())
 
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	if c.Debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
 	mqttClient = mqtt.NewClient(opts)
+	c.mqttClient = mqttClient
+	c.httpClient = http.Client{
+		Timeout: 10 * time.Second,
+	}
 
 	if t := mqttClient.Connect(); t.Wait() && t.Error() != nil {
 		return NewCommandError(t.Error(), 1)
 	}
 	defer mqttClient.Disconnect(100)
 
-	err := registerSensors(debug)
+	err := c.registerSensors()
 	if err != nil {
 		return NewCommandError(err, 2)
 	}
 
 	loc := fmt.Sprintf("%.3f,%.3f", s.Latitude, s.Longitude)
 	apiKey := s.AccuAPIToken
-	cast, err := loadCast(s.UseTestData, loc, apiKey)
+
+	cast, err := c.loadCast()
+	if cast.UpdateTime.Before(time.Now().Add(time.Minute * 80)) {
+		cast, err = queryAPI(c.httpClient, apiKey, loc)
+		if err != nil {
+			log.Warn().Err(err)
+		}
+	}
+	go c.RefreshCast(apiKey, loc)
+
 	if err != nil {
 		fmt.Println("Failed to retrieve MinuteCast: ", err)
 	}
-	if debug {
+	if c.Debug {
 		fmt.Printf("Retrieved cast with data:\n%v\n", cast)
 	}
 
-	if debug {
+	if c.Debug {
 		fmt.Println("Sending online status payload on accu-mqtt/available")
 	}
 	if t := mqttClient.Publish("accu-mqtt/available", 0, true, "online"); t.Wait() && t.Error() != nil {
@@ -91,26 +159,20 @@ func (s *Start) Run(debug bool) error {
 
 	var data []byte
 	go func() {
-		for range time.NewTicker(time.Second * 10).C {
+		for range time.NewTicker(time.Second * 30).C {
 			state := getStateFromCast(cast)
 			data, _ = json.Marshal(&state)
-			if debug {
-				fmt.Printf("Sending state update:\n%v\n", state)
-			}
+			log.Debug().Msgf("Sending state update:\n%v\n", state)
+
 			if t := mqttClient.Publish("accu-mqtt/attributes", 0, false, data); t.Wait() && t.Error() != nil {
-				fmt.Println("failed to publish state: ", t.Error())
+				log.Warn().Msgf("failed to publish state: %v", t.Error())
 			}
 			if t := mqttClient.Publish("accu-mqtt/state", 0, false, data); t.Wait() && t.Error() != nil {
-				fmt.Println("failed to publish state: ", t.Error())
+				log.Warn().Msgf("failed to publish state: %v", t.Error())
 			}
-			if time.Now().After(cast.UpdateTime.Add(time.Hour * 1)) {
-				if debug {
-					fmt.Println("updating cast")
-				}
-				cast, err = loadCast(s.UseTestData, loc, apiKey)
-				if err != nil {
-					fmt.Println("Failed to retrieve MinuteCast: ", err)
-				}
+
+			if t := mqttClient.Publish("accu-mqtt/available", 0, true, "online"); t.Wait() && t.Error() != nil {
+				log.Warn().Msgf("failed to publish state: %v", t.Error())
 			}
 		}
 	}()
@@ -127,7 +189,7 @@ func (s *Start) Run(debug bool) error {
 	return nil
 }
 
-func registerSensors(debug bool) error {
+func (c *cli) registerSensors() error {
 	registerRain := Registration{
 		Name:                "Rain Indicator",
 		UniqueID:            "a63ca366-9eda-4301-9428-93b173d15b9a_accu",
@@ -147,9 +209,7 @@ func registerSensors(debug bool) error {
 		},
 	}
 	data, _ := json.Marshal(&registerRain)
-	if debug {
-		fmt.Printf("Sending registration payload:\n%v\n", registerRain)
-	}
+	log.Debug().Msgf("Sending registration payload:\n%v\n", registerRain)
 
 	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rain/config", 0, false, data); t.Wait() && t.Error() != nil {
 		return t.Error()
@@ -174,9 +234,8 @@ func registerSensors(debug bool) error {
 		},
 	}
 	data, _ = json.Marshal(&registerStartSensor)
-	if debug {
-		fmt.Printf("Sending registration payload:\n%v\n", registerStartSensor)
-	}
+
+	log.Debug().Msgf("Sending registration payload:\n%v\n", registerStartSensor)
 
 	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rainstart/config", 0, false, data); t.Wait() && t.Error() != nil {
 		return t.Error()
@@ -201,9 +260,7 @@ func registerSensors(debug bool) error {
 		},
 	}
 	data, _ = json.Marshal(&registerEndSensor)
-	if debug {
-		fmt.Printf("Sending registration payload:\n%v\n", registerEndSensor)
-	}
+	log.Debug().Msgf("Sending registration payload:\n%v\n", registerEndSensor)
 
 	if t := mqttClient.Publish("homeassistant/sensor/accu-mqtt/rainend/config", 0, false, data); t.Wait() && t.Error() != nil {
 		return t.Error()
@@ -212,54 +269,9 @@ func registerSensors(debug bool) error {
 	return nil
 }
 
-func loadCast(useTestData bool, loc string, apiKey string) (cast MinuteCast, err error) {
-	hClient := http.Client{}
-	hClient.Timeout = time.Second * 15
-
-	// try to load existing data and check if valid to avoid another query. (e.g. on restarts)
+func (c *cli) loadCast() (cast MinuteCast, err error) {
 	data, _ := os.ReadFile("./last_update.json")
 	err = json.Unmarshal(data, &cast)
-	if err == nil && time.Since(cast.UpdateTime) < 1*time.Hour {
-		fmt.Println("using existing cast data from file")
-		return cast, err
-	}
-
-	if !useTestData {
-		res, err := hClient.Get(fmt.Sprintf("https://dataservice.accuweather.com/forecasts/v1/minute?q=%s&apikey=%s", loc, apiKey))
-		if err != nil {
-			return cast, err
-		}
-
-		if res.StatusCode < 199 || res.StatusCode > 299 {
-			data, _ := io.ReadAll(res.Body)
-			return cast, fmt.Errorf("failed to request cast from live api: status [%d]: %s", res.StatusCode, string(data))
-		}
-
-		defer res.Body.Close()
-		data, err := io.ReadAll(res.Body)
-		if err != nil {
-			return cast, err
-		}
-
-		err = json.Unmarshal(data, &cast)
-		if err != nil {
-			return cast, err
-		}
-		cast.UpdateTime = time.Now()
-		if cli.Debug {
-			fmt.Println("Received live cast: ", string(data))
-		}
-
-		data, _ = json.Marshal(&cast)
-		os.WriteFile("./last_update.json", data, 0777)
-	}
-
-	data, _ = os.ReadFile("./last_update.json")
-	err = json.Unmarshal(data, &cast)
-	if err != nil {
-		return cast, err
-	}
-
 	return
 }
 
